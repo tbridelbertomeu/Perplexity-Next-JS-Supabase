@@ -8,6 +8,7 @@ import {
   ChatCenteredDots,
   Stack,
   GitBranch,
+  Trash,
 } from '@phosphor-icons/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -36,16 +37,29 @@ export default function Home() {
   useEffect(() => {
     // Handle new inserts or updates into the table
     const handleRealtimeUpdates = (payload) => {
-      setMessageHistory((prevMessages) => {
-        const lastMessage = prevMessages[prevMessages.length - 1];
-        const isSameType =
-          lastMessage?.payload?.type === 'GPT' &&
-          payload.new.payload.type === 'GPT';
+      if (payload.eventType === 'DELETE') {
+        // Remove the deleted message from the message history
+        setMessageHistory((prevMessages) =>
+          prevMessages.filter((msg) => msg.id !== payload.old.id)
+        );
+      } else if (
+        payload.eventType === 'INSERT' ||
+        payload.eventType === 'UPDATE'
+      ) {
+        // Ensure payload.new is defined before proceeding
+        if (!payload.new || !payload.new.payload) return;
 
-        return isSameType
-          ? [...prevMessages.slice(0, -1), payload.new]
-          : [...prevMessages, payload.new];
-      });
+        setMessageHistory((prevMessages) => {
+          const lastMessage = prevMessages[prevMessages.length - 1];
+          const isSameType =
+            lastMessage?.payload?.type === 'GPT' &&
+            payload.new.payload.type === 'GPT';
+
+          return isSameType
+            ? [...prevMessages.slice(0, -1), payload.new]
+            : [...prevMessages, payload.new];
+        });
+      }
     };
 
     // Subscribe to Supabase channel for real-time updates
@@ -73,6 +87,23 @@ export default function Home() {
     };
   }, []);
 
+  // Function to clear message history
+  const clearMessageHistory = () => {
+    // Delete all messages from the Supabase 'message_history' table
+    supabase
+      .from('message_history')
+      .delete()
+      .gte('id', 0) // Ensure all records are targeted
+      .then(({ data, error }) => {
+        if (error) {
+          console.log('Error clearing message history:', error);
+        } else {
+          // Reset local message history state
+          setMessageHistory([]);
+        }
+      });
+  };
+
   // 10. Function to send a message
   const sendMessage = (messageToSend) => {
     const message = messageToSend || inputValue;
@@ -97,24 +128,43 @@ export default function Home() {
   // 12. Render home component
   return (
     <div className="flex h-screen">
+      {/* Add clear history button */}
+      <div className="fixed top-4 right-4 z-50">
+        <button
+          onClick={clearMessageHistory}
+          className="p-2 bg-red-500 text-white rounded hover:bg-red-600 shadow-md"
+        >
+          <Trash size={25} />
+        </button>
+      </div>
       {/* 13. Create main container with flex and screen height */}
-      <div className="flex-grow h-screen flex flex-col justify-between mx-auto max-w-4xl">
-        {/* 14. Map over message history to display each message */}
-        {messageHistory.map((message, index) => (
-          <MessageHandler
-            key={index}
-            message={message.payload}
-            sendMessage={sendMessage}
-          />
-        ))}
+      <div className="flex-grow h-screen flex flex-col mx-auto max-w-4xl">
+        {/* Conditional rendering for message history */}
+        {messageHistory.length > 0 ? (
+          <>
+            {/* 14. Map over message history to display each message */}
+            <div className="flex-grow overflow-auto">
+              {messageHistory.map((message, index) => (
+                <MessageHandler
+                  key={index}
+                  message={message.payload}
+                  sendMessage={sendMessage}
+                />
+              ))}
+              {/* 16. Add a ref for the end of messages to enable auto-scroll */}
+              <div ref={messagesEndRef} />
+            </div>
+          </>
+        ) : (
+          <div className="flex-grow" />
+        )}
         {/* 15. Include InputArea for message input and sending */}
         <InputArea
           inputValue={inputValue}
           setInputValue={setInputValue}
           sendMessage={sendMessage}
         />
-        {/* 16. Add a ref for the end of messages to enable auto-scroll */}
-        <div ref={messagesEndRef} />
+        {messageHistory.length <= 0 && <div className="flex-grow" />}
       </div>
     </div>
   );
