@@ -206,7 +206,6 @@ const getGPTResults = async (inputString) => {
 
   // Create an initial row in the database
   let rowId = await createRowForGPTResponse();
-  console.log('Row ID:', rowId);
 
   // Send initial payload
   await sendPayload({ type: 'Heading', content: 'Answer' });
