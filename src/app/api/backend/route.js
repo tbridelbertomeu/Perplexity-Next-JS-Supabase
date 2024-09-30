@@ -7,6 +7,9 @@ import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 import * as cheerio from 'cheerio';
 import fetch from 'node-fetch';
+import { db } from '@/db/index'; // Adjust the import path based on your project structure
+import { webpageEmbeddings } from '@/db/schema';
+import { eq } from 'drizzle-orm';
 
 // Initialize OpenAI and Supabase clients
 const openai = new OpenAI({
@@ -38,7 +41,7 @@ async function sendPayload(content) {
 // Rephrase input using GPT
 async function rephraseInput(inputString) {
   const gptAnswer = await openai.chat.completions.create({
-    model: 'gpt-3.5-turbo',
+    model: 'gpt-4o',
     messages: [
       {
         role: 'system',
@@ -52,98 +55,183 @@ async function rephraseInput(inputString) {
 }
 
 // Search engine for sources
-async function searchEngineForSources(message) {
-  const loader = new BraveSearch({ apiKey: process.env.BRAVE_SEARCH_API_KEY });
-  const rephrasedMessage = await rephraseInput(message);
-  const docs = await loader.call(rephrasedMessage);
+async function searchEngineForSources(message, embeddingSource) {
+  if (embeddingSource === 'database') {
+    // Fetch embeddings from the PostgreSQL database
+    const websiteId = parseInt(process.env.WEBSITE_ID, 10);
 
-  // Normalize data
-  function normalizeData(docs) {
-    return JSON.parse(docs)
-      .filter((doc) => doc.title && doc.link && !doc.link.includes('brave.com'))
-      .slice(0, 4)
-      .map(({ title, link }) => ({ title, link }));
-  }
-  const normalizedData = normalizeData(docs);
+    // Compute the embedding for the user's query
+    const queryEmbeddingResponse = await openai.embeddings.create({
+      model: 'text-embedding-3-small', // Use an appropriate embedding model
+      input: message,
+    });
+    const queryEmbedding = queryEmbeddingResponse.data[0].embedding;
 
-  // Send normalized data as payload
-  await sendPayload({ type: 'Sources', content: normalizedData });
+    // Retrieve embeddings from the database
+    const embeddingsData = await db
+      .select()
+      .from(webpageEmbeddings)
+      .where(eq(webpageEmbeddings.websiteId, websiteId));
 
-  // Initialize vectorCount
-  let vectorCount = 0;
+    // Extract embeddings and associated content
+    const documents = embeddingsData.map((row) => {
+      const embeddingArray =
+        typeof row.embedding === 'string'
+          ? row.embedding.replace(/[{}]/g, '').split(',').map(Number)
+          : row.embedding;
+      return {
+        embedding: embeddingArray,
+        content: row.content,
+        url: row.url,
+      };
+    });
 
-  // Initialize async function for processing each search result item
-  const fetchAndProcess = async (item) => {
-    try {
-      // Create a timer for the fetch promise
-      const timer = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout')), 5000)
-      );
+    // Compute similarities
+    const similarities = documents.map((doc) => ({
+      content: doc.content,
+      url: doc.url,
+      similarity: cosineSimilarity(queryEmbedding, doc.embedding),
+    }));
 
-      // Fetch the content of the page
-      const fetchPromise = fetchPageContent(item.link);
+    // Sort by similarity in descending order
+    similarities.sort((a, b) => b.similarity - a.similarity);
 
-      // Wait for either the fetch promise or the timer
-      const htmlContent = await Promise.race([timer, fetchPromise]);
-
-      // Check for insufficient content length
-      if (htmlContent.length < 250) return null;
-
-      // Split the text into chunks
-      const splitText = await new RecursiveCharacterTextSplitter({
-        chunkSize: 200,
-        chunkOverlap: 0,
-      }).splitText(htmlContent);
-
-      // Create a vector store from the split text
-      const vectorStore = await MemoryVectorStore.fromTexts(
-        splitText,
-        { annotationPosition: item.link },
-        embeddings
-      );
-
-      // Increment the vector count
-      vectorCount++;
-
-      // Perform similarity search on the vectors
-      return await vectorStore.similaritySearch(message, 1);
-    } catch (error) {
-      // Log any error and increment the vector count
+    // Print the list of documents with associated scores
+    console.log('Documents with similarity scores:');
+    similarities.forEach((doc, index) => {
       console.log(
-        `Failed to fetch content for ${item.link}, error: ${error.message}`
+        `${index + 1}. Score: ${doc.similarity.toFixed(4)}, URL: ${doc.url}`
       );
-      vectorCount++;
-      return null;
+      console.log(`   Content: ${doc.content.substring(0, 100)}...`);
+    });
+
+    // Select top N documents (e.g., top 4)
+    const topDocuments = similarities.slice(0, 4);
+
+    // Prepare context for LLM
+    const contextText = topDocuments.map((doc) => doc.content).join('\n\n');
+
+    // Send 'Sources' payload to frontend with content and link
+    const sourcesPayload = topDocuments.map((doc) => ({
+      title: doc.content,
+      link: doc.url,
+    }));
+    await sendPayload({ type: 'Sources', content: sourcesPayload });
+
+    // Send a payload message indicating the vector creation process is complete
+    await sendPayload({
+      type: 'VectorCreation',
+      content: `Finished Retrieving Embeddings from Database.`,
+    });
+
+    // Trigger LLM with context and query
+    await triggerLLMAndFollowup(`Context: ${contextText}\n\nQuery: ${message}`);
+  } else {
+    // Fetch embeddings from internet pages as usual
+    const loader = new BraveSearch({
+      apiKey: process.env.BRAVE_SEARCH_API_KEY,
+    });
+    const rephrasedMessage = await rephraseInput(message);
+    const docs = await loader.call(rephrasedMessage);
+
+    // Normalize data
+    function normalizeData(docs) {
+      return JSON.parse(docs)
+        .filter(
+          (doc) => doc.title && doc.link && !doc.link.includes('brave.com')
+        )
+        .slice(0, 4)
+        .map(({ title, link }) => ({ title, link }));
     }
-  };
+    const normalizedData = normalizeData(docs);
 
-  // Wait for all fetch and process promises to complete
-  const results = await Promise.all(normalizedData.map(fetchAndProcess));
+    // Send normalized data as payload
+    await sendPayload({ type: 'Sources', content: normalizedData });
 
-  // Make sure that vectorCount reaches at least 4
-  while (vectorCount < 4) {
-    vectorCount++;
+    // Initialize vectorCount
+    let vectorCount = 0;
+
+    // Initialize async function for processing each search result item
+    const fetchAndProcess = async (item) => {
+      try {
+        // Create a timer for the fetch promise
+        const timer = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout')), 5000)
+        );
+
+        // Fetch the content of the page
+        const fetchPromise = fetchPageContent(item.link);
+
+        // Wait for either the fetch promise or the timer
+        const htmlContent = await Promise.race([timer, fetchPromise]);
+
+        // Check for insufficient content length
+        if (htmlContent.length < 250) return null;
+
+        // Split the text into chunks
+        const splitText = await new RecursiveCharacterTextSplitter({
+          chunkSize: 200,
+          chunkOverlap: 0,
+        }).splitText(htmlContent);
+
+        // Create a vector store from the split text
+        const vectorStore = await MemoryVectorStore.fromTexts(
+          splitText,
+          { annotationPosition: item.link },
+          embeddings
+        );
+
+        // Increment the vector count
+        vectorCount++;
+
+        // Perform similarity search on the vectors
+        return await vectorStore.similaritySearch(message, 1);
+      } catch (error) {
+        // Log any error and increment the vector count
+        console.log(
+          `Failed to fetch content for ${item.link}, error: ${error.message}`
+        );
+        vectorCount++;
+        return null;
+      }
+    };
+
+    // Wait for all fetch and process promises to complete
+    const results = await Promise.all(normalizedData.map(fetchAndProcess));
+
+    // Make sure that vectorCount reaches at least 4
+    while (vectorCount < 4) {
+      vectorCount++;
+    }
+
+    // Filter out unsuccessful results
+    const successfulResults = results.filter((result) => result !== null);
+
+    // Get top 4 results if there are more than 4, otherwise get all
+    const topResult =
+      successfulResults.length > 4
+        ? successfulResults.slice(0, 4)
+        : successfulResults;
+
+    // Send a payload message indicating the vector creation process is complete
+    await sendPayload({
+      type: 'VectorCreation',
+      content: `Finished Scanning Sources.`,
+    });
+
+    // Trigger any remaining logic and follow-up actions
+    await triggerLLMAndFollowup(
+      `Query: ${message}, Top Results: ${JSON.stringify(topResult)}`
+    );
   }
+}
 
-  // Filter out unsuccessful results
-  const successfulResults = results.filter((result) => result !== null);
-
-  // Get top 4 results if there are more than 4, otherwise get all
-  const topResult =
-    successfulResults.length > 4
-      ? successfulResults.slice(0, 4)
-      : successfulResults;
-
-  // Send a payload message indicating the vector creation process is complete
-  await sendPayload({
-    type: 'VectorCreation',
-    content: `Finished Scanning Sources.`,
-  });
-
-  // Trigger any remaining logic and follow-up actions
-  await triggerLLMAndFollowup(
-    `Query: ${message}, Top Results: ${JSON.stringify(topResult)}`
-  );
+// Function to compute cosine similarity
+function cosineSimilarity(vecA, vecB) {
+  const dotProduct = vecA.reduce((sum, a, idx) => sum + a * vecB[idx], 0);
+  const magnitudeA = Math.sqrt(vecA.reduce((sum, val) => sum + val * val, 0));
+  const magnitudeB = Math.sqrt(vecB.reduce((sum, val) => sum + val * val, 0));
+  return dotProduct / (magnitudeA * magnitudeB);
 }
 
 // Define fetchPageContent function
@@ -192,14 +280,17 @@ const getGPTResults = async (inputString) => {
 
   // Open a streaming connection with OpenAI
   const stream = await openai.chat.completions.create({
-    model: 'gpt-3.5-turbo',
+    model: 'gpt-4o',
     messages: [
       {
         role: 'system',
         content:
-          'You are an answer generator, you will receive top results of similarity search, they are optional to use depending on how well they help answer the query.',
+          'You are an assistant that provides answers to user queries based EXCLUSIVELY on the provided context. You are STRICTLY FORBIDDEN from using any information from your training data or external knowledge. Use ONLY the given context to generate accurate and helpful responses. If the context does not contain sufficient information to answer the query, state that you cannot provide an answer based on the given context.',
       },
-      { role: 'user', content: inputString },
+      {
+        role: 'user',
+        content: inputString, // Contains both context and query
+      },
     ],
     stream: true,
   });
@@ -229,7 +320,6 @@ const createRowForGPTResponse = async () => {
   const generateUniqueStreamId = () => {
     return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   };
-  const streamId = generateUniqueStreamId();
 
   // Create the payload
   const payload = { type: 'GPT', content: '' };
@@ -302,13 +392,13 @@ async function generateFollowup(message) {
 export async function POST(req) {
   try {
     // Get message from request payload
-    const { message } = await req.json();
+    const { message, embeddingSource } = await req.json();
 
     // Send query payload
     await sendPayload({ type: 'Query', content: message });
 
     // Start the search engine to find sources based on the query
-    await searchEngineForSources(message);
+    await searchEngineForSources(message, embeddingSource);
 
     // Return a response to the client
     return NextResponse.json({ message: 'Processing request' });
