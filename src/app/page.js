@@ -1,85 +1,106 @@
-"use client";
-"use strict";
+'use client';
+'use strict';
 // 1. Import required dependencies
-import React, { useEffect, useRef, useState, memo } from "react";
-import { ArrowCircleRight, ChatCenteredDots, Stack, GitBranch } from "@phosphor-icons/react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { createClient } from "@supabase/supabase-js";
+import React, { useEffect, useRef, useState, memo } from 'react';
+import {
+  ArrowCircleRight,
+  ChatCenteredDots,
+  Stack,
+  GitBranch,
+} from '@phosphor-icons/react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { createClient } from '@supabase/supabase-js';
 // 2. Initialize Supabase client
-const SUPABASE_URL = "https://duvslrminwfswhezmqli.supabase.co";
+const SUPABASE_URL = 'https://duvslrminwfswhezmqli.supabase.co';
 const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR1dnNscm1pbndmc3doZXptcWxpIiwicm9sZSI6ImFub24iLCJpYXQiOjE2OTc4OTc4MDYsImV4cCI6MjAxMzQ3MzgwNn0.lvGJAaLpRr5X7uLVpS5IOqVbN8dXDsAjmkG31F8S380";
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR1dnNscm1pbndmc3doZXptcWxpIiwicm9sZSI6ImFub24iLCJpYXQiOjE2OTc4OTc4MDYsImV4cCI6MjAxMzQ3MzgwNn0.lvGJAaLpRr5X7uLVpS5IOqVbN8dXDsAjmkG31F8S380';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // 3. Home component
 export default function Home() {
-// 4. Initialize states and refs
+  // 4. Initialize states and refs
   const messagesEndRef = useRef(null);
-  const [inputValue, setInputValue] = useState("");
+  const [inputValue, setInputValue] = useState('');
   const [messageHistory, setMessageHistory] = useState([]);
-// 5. Auto-scroll to last message
+  // 5. Auto-scroll to last message
   useEffect(() => {
     setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, 0);
   }, [messageHistory]);
-// 6. Fetch message history from Supabase
+  // 6. Fetch message history from Supabase
   useEffect(() => {
-// 7. Handle new inserts into the table
+    // 7. Handle new inserts into the table
     const handleInserts = (payload) => {
       setMessageHistory((prevMessages) => {
         const lastMessage = prevMessages[prevMessages.length - 1];
-        const isSameType = lastMessage?.payload?.type === "GPT" && payload.new.payload.type === "GPT";
-        return isSameType ? [...prevMessages.slice(0, -1), payload.new] : [...prevMessages, payload.new];
+        const isSameType =
+          lastMessage?.payload?.type === 'GPT' &&
+          payload.new.payload.type === 'GPT';
+        return isSameType
+          ? [...prevMessages.slice(0, -1), payload.new]
+          : [...prevMessages, payload.new];
       });
     };
-// 8. Subscribe to Supabase channel for real-time updates
+    // 8. Subscribe to Supabase channel for real-time updates
     supabase
-      .channel("message_history")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_history" }, handleInserts)
+      .channel('message_history')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'message_history' },
+        handleInserts
+      )
       .subscribe();
-// 9. Fetch existing message history from Supabase
+    // 9. Fetch existing message history from Supabase
     supabase
-      .from("message_history")
-      .select("*")
-      .order("created_at", { ascending: true })
+      .from('message_history')
+      .select('*')
+      .order('created_at', { ascending: true })
       .then(({ data: message_history, error }) =>
-        error ? console.log("error", error) : setMessageHistory(message_history)
+        error ? console.log('error', error) : setMessageHistory(message_history)
       );
   }, []);
-// 10. Function to send a message
+  // 10. Function to send a message
   const sendMessage = (messageToSend) => {
     const message = messageToSend || inputValue;
     const body = JSON.stringify({ message: message });
-    setInputValue("");
-// 11. POST message to the backend
-    fetch("/api/backend", {
-      method: "POST",
+    setInputValue('');
+    // 11. POST message to the backend
+    fetch('/api/backend', {
+      method: 'POST',
       body,
       headers: {
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
       },
     })
       .then((res) => res.json())
       .then((data) => {
-        console.log("data", data);
+        console.log('data', data);
       })
-      .catch((err) => console.log("err", err));
+      .catch((err) => console.log('err', err));
   };
-// 12. Render home component
+  // 12. Render home component
   return (
     <div className="flex h-screen">
-{/* 13. Create main container with flex and screen height */}
+      {/* 13. Create main container with flex and screen height */}
       <div className="flex-grow h-screen flex flex-col justify-between mx-auto max-w-4xl">
-{/* 14. Map over message history to display each message */}
+        {/* 14. Map over message history to display each message */}
         {messageHistory.map((message, index) => (
           <>
-            <MessageHandler key={index} message={message.payload} sendMessage={sendMessage} />
+            <MessageHandler
+              key={index}
+              message={message.payload}
+              sendMessage={sendMessage}
+            />
           </>
         ))}
-{/* 15. Include InputArea for message input and sending */}
-        <InputArea inputValue={inputValue} setInputValue={setInputValue} sendMessage={sendMessage} />
-{/* 16. Add a ref for the end of messages to enable auto-scroll */}
+        {/* 15. Include InputArea for message input and sending */}
+        <InputArea
+          inputValue={inputValue}
+          setInputValue={setInputValue}
+          sendMessage={sendMessage}
+        />
+        {/* 16. Add a ref for the end of messages to enable auto-scroll */}
         <div ref={messagesEndRef} />
       </div>
     </div>
@@ -87,19 +108,22 @@ export default function Home() {
 }
 /* 17. Export InputArea component */
 export function InputArea({ inputValue, setInputValue, sendMessage }) {
-/* 18. Render input and send button */
+  /* 18. Render input and send button */
   return (
     <div className="flex items-center py-3">
-{/* 19. Create input box for message */}
+      {/* 19. Create input box for message */}
       <input
         type="text"
         className="flex-1 p-2 border rounded-l-md focus:outline-none focus:border-blue-500"
         value={inputValue}
         onChange={(e) => setInputValue(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+        onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
       />
-{/* 20. Create send button */}
-      <button onClick={sendMessage} className="bg-blue-500 text-white p-2 rounded-r-md hover:bg-blue-600">
+      {/* 20. Create send button */}
+      <button
+        onClick={sendMessage}
+        className="bg-blue-500 text-white p-2 rounded-r-md hover:bg-blue-600"
+      >
         <ArrowCircleRight size={25} />
       </button>
     </div>
@@ -111,12 +135,13 @@ export const Query = ({ content }) => {
 };
 /* 22. Sources component for displaying list of sources */
 export const Sources = ({ content }) => {
-// 23. Truncate text to a given length
-  const truncateText = (text, maxLength) => (text.length <= maxLength ? text : `${text.substring(0, maxLength)}...`);
-// 24. Extract site name from a URL
-  const extractSiteName = (url) => new URL(url).hostname.replace("www.", "");
+  // 23. Truncate text to a given length
+  const truncateText = (text, maxLength) =>
+    text.length <= maxLength ? text : `${text.substring(0, maxLength)}...`;
+  // 24. Extract site name from a URL
+  const extractSiteName = (url) => new URL(url).hostname.replace('www.', '');
   return (
-// 25. Render the Sources component
+    // 25. Render the Sources component
     <>
       <div className="text-3xl font-bold my-4 w-full flex">
         <GitBranch size={32} />
@@ -124,7 +149,7 @@ export const Sources = ({ content }) => {
       </div>
       <div className="flex flex-wrap">
         {
-// 26. Map over the content array to create source tiles
+          // 26. Map over the content array to create source tiles
           content?.map(({ title, link }) => (
             <a href={link} className="w-1/4 p-1">
               <span className="flex flex-col items-center py-2 px-6 bg-white rounded shadow hover:shadow-lg transition-shadow duration-300 tile-animation h-full">
@@ -140,9 +165,9 @@ export const Sources = ({ content }) => {
 };
 // 27. VectorCreation component for displaying a brief message
 export const VectorCreation = ({ content }) => {
-// 28. Initialize state to control visibility of the component
+  // 28. Initialize state to control visibility of the component
   const [visible, setVisible] = useState(true);
-// 29. Use useEffect to handle the visibility timer
+  // 29. Use useEffect to handle the visibility timer
   useEffect(() => {
     const timer = setTimeout(() => setVisible(false), 3000);
     return () => clearTimeout(timer);
@@ -170,7 +195,9 @@ const GPT = ({ content }) => (
     className="prose mt-1 w-full break-words prose-p:leading-relaxed"
     remarkPlugins={[remarkGfm]}
     components={{
-      a: ({ node, ...props }) => <a {...props} style={{ color: "blue", fontWeight: "bold" }} />,
+      a: ({ node, ...props }) => (
+        <a {...props} style={{ color: 'blue', fontWeight: 'bold' }} />
+      ),
     }}
   >
     {content}
@@ -178,33 +205,33 @@ const GPT = ({ content }) => (
 );
 // 31. FollowUp component for displaying follow-up options
 export const FollowUp = ({ content, sendMessage }) => {
-// 32. State for storing parsed follow-up options
+  // 32. State for storing parsed follow-up options
   const [followUp, setFollowUp] = useState([]);
-// 33. useRef for scrolling
+  // 33. useRef for scrolling
   const messagesEndReff = useRef(null);
-// 34. Scroll into view when followUp changes
+  // 34. Scroll into view when followUp changes
   useEffect(() => {
     setTimeout(() => {
-      messagesEndReff.current?.scrollIntoView({ behavior: "smooth" });
+      messagesEndReff.current?.scrollIntoView({ behavior: 'smooth' });
     }, 0);
   }, [followUp]);
-// 35. Parse JSON content to extract follow-up options
+  // 35. Parse JSON content to extract follow-up options
   useEffect(() => {
-    if (content[0] === "{" && content[content.length - 1] === "}") {
+    if (content[0] === '{' && content[content.length - 1] === '}') {
       try {
         const parsed = JSON.parse(content);
         setFollowUp(parsed.follow_up || []);
       } catch (error) {
-        console.log("error parsing json", error);
+        console.log('error parsing json', error);
       }
     }
   }, [content]);
-// 36. Handle follow-up click event
+  // 36. Handle follow-up click event
   const handleFollowUpClick = (text, e) => {
     e.preventDefault();
     sendMessage(text);
   };
-// 37. Render the FollowUp component
+  // 37. Render the FollowUp component
   return (
     <>
       {followUp.length > 0 && (
@@ -212,20 +239,25 @@ export const FollowUp = ({ content, sendMessage }) => {
           <Stack size={32} /> <span className="px-2">Follow-Up</span>
         </div>
       )}
-{/* 38. Map over follow-up options */}
+      {/* 38. Map over follow-up options */}
       {followUp.map((text, index) => (
-        <a href="#" key={index} className="text-xl w-full p-1" onClick={(e) => handleFollowUpClick(text, e)}>
+        <a
+          href="#"
+          key={index}
+          className="text-xl w-full p-1"
+          onClick={(e) => handleFollowUpClick(text, e)}
+        >
           <span>{text}</span>
         </a>
       ))}
-{/* 39. Scroll anchor */}
+      {/* 39. Scroll anchor */}
       <div ref={messagesEndReff} />
     </>
   );
 };
 // 40. MessageHandler component for dynamically rendering message components
 const MessageHandler = memo(({ message, sendMessage }) => {
-// 41. Map message types to components
+  // 41. Map message types to components
   const COMPONENT_MAP = {
     Query,
     Sources,
@@ -234,7 +266,9 @@ const MessageHandler = memo(({ message, sendMessage }) => {
     GPT,
     FollowUp,
   };
-// 42. Determine which component to render based on message type
+  // 42. Determine which component to render based on message type
   const Component = COMPONENT_MAP[message.type];
-  return Component ? <Component content={message.content} sendMessage={sendMessage} /> : null;
+  return Component ? (
+    <Component content={message.content} sendMessage={sendMessage} />
+  ) : null;
 });
