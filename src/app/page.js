@@ -26,6 +26,9 @@ export default function Home() {
   const [inputValue, setInputValue] = useState('');
   const [messageHistory, setMessageHistory] = useState([]);
 
+  // Add state variable to track the embedding source
+  const [embeddingSource, setEmbeddingSource] = useState('internet');
+
   // 5. Auto-scroll to last message
   useEffect(() => {
     setTimeout(() => {
@@ -107,7 +110,7 @@ export default function Home() {
   // 10. Function to send a message
   const sendMessage = (messageToSend) => {
     const message = messageToSend || inputValue;
-    const body = JSON.stringify({ message });
+    const body = JSON.stringify({ message, embeddingSource }); // Include embeddingSource
     setInputValue('');
 
     // 11. POST message to the backend
@@ -158,6 +161,25 @@ export default function Home() {
         ) : (
           <div className="flex-grow" />
         )}
+        {/* Add the switch above the InputArea */}
+        <div className="flex items-center py-3">
+          {/* Switch component */}
+          <label className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              checked={embeddingSource === 'database'}
+              onChange={(e) =>
+                setEmbeddingSource(e.target.checked ? 'database' : 'internet')
+              }
+              className="toggle-checkbox"
+            />
+            <span className="toggle-label">
+              {embeddingSource === 'database'
+                ? 'Database Embeddings'
+                : 'Internet Embeddings'}
+            </span>
+          </label>
+        </div>
         {/* 15. Include InputArea for message input and sending */}
         <InputArea
           inputValue={inputValue}
@@ -314,21 +336,23 @@ export const FollowUp = ({ content, sendMessage }) => {
   return (
     <>
       {followUp.length > 0 && (
-        <div className="text-3xl font-bold my-4 w-full flex">
+        <div className="text-3xl font-bold my-4 w-full flex items-center">
           <Stack size={32} /> <span className="px-2">Follow-Up</span>
         </div>
       )}
       {/* 38. Map over follow-up options */}
-      {followUp.map((text, index) => (
-        <a
-          href="#"
-          key={index}
-          className="text-xl w-full p-1"
-          onClick={(e) => handleFollowUpClick(text, e)}
-        >
-          <span>{text}</span>
-        </a>
-      ))}
+      <div className="flex flex-col space-y-2">
+        {followUp.map((text, index) => (
+          <a
+            href="#"
+            key={index}
+            className="text-xl w-full p-2 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors duration-200"
+            onClick={(e) => handleFollowUpClick(text, e)}
+          >
+            <span>{text}</span>
+          </a>
+        ))}
+      </div>
       {/* 39. Scroll anchor */}
       <div ref={messagesEndReff} />
     </>
